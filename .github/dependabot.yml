@@ -6,7 +6,7 @@ updates:
       interval: weekly
     groups:
       cargo:
-        update-types: [minor, patch]
+        patterns: ["*"]
 
   - package-ecosystem: github-actions
     directory: /
@@ -14,4 +14,4 @@ updates:
       interval: weekly
     groups:
       actions:
-        update-types: [minor, patch]
+        patterns: ["*"]
