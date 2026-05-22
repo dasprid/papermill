@@ -36,7 +36,7 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 strum = { version = "0.27", features = ["derive"] }
 thiserror = "2.0"
 tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "fs", "signal", "io-std", "io-util", "sync"] }
-toml = "0.9"
+toml = "1.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = { version = "2.5", features = ["serde"] }
