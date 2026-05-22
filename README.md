@@ -1,5 +1,7 @@
 # papermill
 
+[![CI](https://github.com/DASPRiD/papermill/actions/workflows/ci.yml/badge.svg)](https://github.com/DASPRiD/papermill/actions/workflows/ci.yml)
+
 Pull invoices from telco-style portals into a Paperless-ngx instance.
 
 A CLI that replaces the manual "log in, find the invoice, download the PDF, upload to paperless" loop. Runs from cron or interactively. Tracks each transferred invoice in a local SQLite database so reruns skip what's already done.
