@@ -1,2 +1,4 @@
 [workspace]
 publish = false
+git_only = true
+features_always_increment_minor = true
