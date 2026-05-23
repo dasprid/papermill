@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/DASPRiD/papermill/compare/v0.1.0...v0.2.0) - 2026-05-23
+
+### Added
+
+- [**breaking**] multi-instance, multi-sink architecture
+
+### Other
+
+- *(release-plz)* use git tags as version baseline
+- rewrite README for multi-sink architecture
+- *(cd)* build macOS aarch64 and Windows x86_64 release binaries
+- release v0.1.0 ([#7](https://github.com/DASPRiD/papermill/pull/7))
+
 ## [0.1.0](https://github.com/DASPRiD/papermill/releases/tag/v0.1.0) - 2026-05-22
 
 ### Fixed
