@@ -1,45 +1,14 @@
 use anyhow::{Context, bail};
+use async_trait::async_trait;
 use chrono::NaiveDate;
-use inquire::{Password, PasswordDisplayMode};
 use reqwest::Url;
 use reqwest::multipart::{Form, Part};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 
+use crate::config::PaperlessBinding;
+use crate::sinks::{DeliveryContext, DeliveryReceipt, Sink, SinkKind};
 use crate::sources::InvoiceContent;
-use crate::{keystore, tty};
-
-const ACCOUNT: &str = "sink:paperless";
-
-pub fn read_token() -> anyhow::Result<Option<SecretString>> {
-    keystore::read_secret(ACCOUNT)
-}
-
-pub fn write_token(token: &SecretString) -> anyhow::Result<()> {
-    keystore::write_secret(ACCOUNT, token)
-}
-
-pub fn resolve_token() -> anyhow::Result<SecretString> {
-    if let Some(token) = read_token()? {
-        return Ok(token);
-    }
-
-    tty::require()?;
-
-    let raw = Password::new("Paperless API token:")
-        .with_display_mode(PasswordDisplayMode::Masked)
-        .without_confirmation()
-        .prompt()
-        .context("Failed to read paperless token")?;
-
-    if raw.is_empty() {
-        bail!("paperless API token is required");
-    }
-
-    let token = SecretString::from(raw);
-    write_token(&token)?;
-    Ok(token)
-}
 
 pub struct PaperlessClient {
     base_url: Url,
@@ -195,5 +164,54 @@ impl PaperlessClient {
             .with_context(|| format!("Failed to decode paperless {path} page"))?;
 
         Ok(page.results)
+    }
+}
+
+pub struct PaperlessSink {
+    instance_name: String,
+    client: PaperlessClient,
+    binding: PaperlessBinding,
+}
+
+impl PaperlessSink {
+    pub fn new(instance_name: &str, client: PaperlessClient, binding: PaperlessBinding) -> Self {
+        Self {
+            instance_name: instance_name.to_string(),
+            client,
+            binding,
+        }
+    }
+}
+
+#[async_trait]
+impl Sink for PaperlessSink {
+    fn kind(&self) -> SinkKind {
+        SinkKind::Paperless
+    }
+
+    fn instance_name(&self) -> &str {
+        &self.instance_name
+    }
+
+    async fn deliver(&self, ctx: DeliveryContext<'_>) -> anyhow::Result<DeliveryReceipt> {
+        let metadata = UploadMetadata {
+            title: Some(format!(
+                "{} {}",
+                ctx.source_kind.name(),
+                ctx.invoice.invoice_number
+            )),
+            created_on: Some(ctx.invoice.issued_on),
+            correspondent_id: self.binding.correspondent_id,
+            document_type_id: self.binding.document_type_id,
+            tag_ids: self.binding.tag_ids.clone(),
+        };
+
+        let result = self
+            .client
+            .upload(ctx.content.into_owned(), &metadata)
+            .await?;
+        Ok(DeliveryReceipt {
+            reference: Some(result.task_id),
+        })
     }
 }

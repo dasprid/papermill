@@ -1,9 +1,10 @@
+use std::borrow::Cow;
+
 use anyhow::anyhow;
 use chrono::Utc;
 
-use crate::config::SourceConfig;
-use crate::paperless::{PaperlessClient, UploadMetadata};
 use crate::shutdown;
+use crate::sinks::{DeliveryContext, Sink};
 use crate::sources::{Source, SourceError};
 use crate::state::{StateStore, UploadRecord};
 
@@ -14,20 +15,31 @@ pub struct TransferOutcome {
     pub skipped: usize,
 }
 
+pub enum SinkTarget {
+    Live(Box<dyn Sink>),
+    DryRun(String),
+}
+
+impl SinkTarget {
+    pub fn instance_name(&self) -> &str {
+        match self {
+            Self::Live(sink) => sink.instance_name(),
+            Self::DryRun(name) => name,
+        }
+    }
+}
+
 pub async fn run_transfer(
     source: &mut dyn Source,
-    target: &SourceConfig,
-    paperless: Option<&PaperlessClient>,
+    targets: &[SinkTarget],
     state: &StateStore,
     dry_run: bool,
 ) -> Result<TransferOutcome, SourceError> {
-    if !dry_run && paperless.is_none() {
-        return Err(
-            anyhow!("run_transfer: paperless client required when not in dry-run mode").into(),
-        );
+    if targets.is_empty() {
+        return Err(anyhow!("run_transfer: no sink targets configured").into());
     }
 
-    let since = state.last_issued_date(source.kind().name()).await?;
+    let since = state.last_issued_date(source.instance_name()).await?;
     let invoices = source.list_invoices(since).await?;
 
     let mut outcome = TransferOutcome {
@@ -40,12 +52,12 @@ pub async fn run_transfer(
             break;
         }
 
-        if state
-            .is_uploaded(source.kind().name(), &invoice.external_id)
-            .await?
-        {
+        let pending_targets =
+            pending_for_invoice(state, source.instance_name(), invoice, targets).await?;
+
+        if pending_targets.is_empty() {
             tracing::debug!(
-                source = source.kind().name(),
+                source = source.instance_name(),
                 "skipping already-uploaded invoice {}",
                 invoice.invoice_number
             );
@@ -54,51 +66,76 @@ pub async fn run_transfer(
         }
 
         if dry_run {
-            tracing::info!(
-                source = source.kind().name(),
-                "dry-run upload: {} ({})",
-                invoice.invoice_number,
-                invoice.issued_on
-            );
-            outcome.uploaded += 1;
+            for target in &pending_targets {
+                tracing::info!(
+                    source = source.instance_name(),
+                    sink = target.instance_name(),
+                    "dry-run upload: {} ({})",
+                    invoice.invoice_number,
+                    invoice.issued_on
+                );
+                outcome.uploaded += 1;
+            }
+
             continue;
         }
 
-        tracing::info!(
-            source = source.kind().name(),
-            "transferring {} ({})",
-            invoice.invoice_number,
-            invoice.issued_on
-        );
-
         let content = source.download_invoice(invoice).await?;
-        let metadata = UploadMetadata {
-            title: Some(format!(
-                "{} {}",
-                source.kind().name(),
-                invoice.invoice_number
-            )),
-            created_on: Some(invoice.issued_on),
-            correspondent_id: target.correspondent_id,
-            document_type_id: target.document_type_id,
-            tag_ids: target.tag_ids.clone(),
-        };
 
-        let client = paperless.expect("guarded above when !dry_run");
-        let result = client.upload(content, &metadata).await?;
+        for target in pending_targets {
+            let SinkTarget::Live(sink) = target else {
+                continue;
+            };
 
-        state
-            .record_upload(&UploadRecord {
-                source_id: source.kind().name().to_string(),
-                external_id: invoice.external_id.clone(),
-                paperless_task_id: result.task_id,
-                invoice_issued_at: invoice.issued_on,
-                uploaded_at: Utc::now(),
-            })
-            .await?;
+            tracing::info!(
+                source = source.instance_name(),
+                sink = sink.instance_name(),
+                "delivering {} ({})",
+                invoice.invoice_number,
+                invoice.issued_on
+            );
 
-        outcome.uploaded += 1;
+            let ctx = DeliveryContext {
+                source_kind: source.kind(),
+                invoice,
+                content: Cow::Borrowed(&content),
+            };
+            let receipt = sink.deliver(ctx).await?;
+
+            state
+                .record_upload(&UploadRecord {
+                    source_id: source.instance_name().to_string(),
+                    sink_id: sink.instance_name().to_string(),
+                    external_id: invoice.external_id.clone(),
+                    sink_reference: receipt.reference,
+                    invoice_issued_at: invoice.issued_on,
+                    uploaded_at: Utc::now(),
+                })
+                .await?;
+
+            outcome.uploaded += 1;
+        }
     }
 
     Ok(outcome)
+}
+
+async fn pending_for_invoice<'a>(
+    state: &StateStore,
+    source_id: &str,
+    invoice: &crate::sources::Invoice,
+    targets: &'a [SinkTarget],
+) -> Result<Vec<&'a SinkTarget>, SourceError> {
+    let mut pending = Vec::with_capacity(targets.len());
+
+    for target in targets {
+        if !state
+            .is_uploaded(source_id, target.instance_name(), &invoice.external_id)
+            .await?
+        {
+            pending.push(target);
+        }
+    }
+
+    Ok(pending)
 }

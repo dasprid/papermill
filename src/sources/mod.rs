@@ -7,13 +7,13 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use strum::{EnumIter, IntoEnumIterator};
 use thiserror::Error;
 
-mod mock;
 mod o2;
 mod vodafone;
+pub mod wizard;
 
-pub use mock::MockSource;
 pub use o2::O2Source;
 pub use vodafone::VodafoneSource;
+pub use wizard::{SourceWizard, UsernamePasswordSourceWizard};
 
 macro_rules! sources {
     ($($variant:ident($ty:ty, $name:literal, $label:literal)),* $(,)?) => {
@@ -35,9 +35,9 @@ macro_rules! sources {
                 }
             }
 
-            pub async fn build(&self) -> Result<Box<dyn Source>, SourceError> {
+            pub async fn build(&self, instance_name: &str) -> Result<Box<dyn Source>, SourceError> {
                 match self {
-                    $(Self::$variant => Ok(Box::new(<$ty>::new().await?)),)*
+                    $(Self::$variant => Ok(Box::new(<$ty>::new(instance_name).await?)),)*
                 }
             }
         }
@@ -79,9 +79,16 @@ impl<'de> Deserialize<'de> for SourceKind {
 }
 
 sources! {
-    Mock(MockSource, "mock", "Mock (for testing)"),
     Vodafone(VodafoneSource, "vodafone", "Vodafone"),
     O2(O2Source, "o2", "Telefónica O2"),
+}
+
+impl SourceKind {
+    pub fn wizard(&self) -> Box<dyn SourceWizard> {
+        match self {
+            Self::Vodafone | Self::O2 => Box::new(UsernamePasswordSourceWizard::new(*self)),
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -103,7 +110,7 @@ pub struct Invoice {
     pub issued_on: NaiveDate,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InvoiceContent {
     pub bytes: Vec<u8>,
     pub filename: String,
@@ -113,6 +120,7 @@ pub struct InvoiceContent {
 #[async_trait]
 pub trait Source: Send {
     fn kind(&self) -> SourceKind;
+    fn instance_name(&self) -> &str;
     async fn list_invoices(
         &mut self,
         since: Option<NaiveDate>,

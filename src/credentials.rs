@@ -3,13 +3,8 @@ use inquire::{Password, PasswordDisplayMode, Text};
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
+use crate::sources::SourceKind;
 use crate::{keystore, tty};
-
-const SOURCE_ACCOUNT_PREFIX: &str = "source:";
-
-fn source_account(name: &str) -> String {
-    format!("{SOURCE_ACCOUNT_PREFIX}{name}")
-}
 
 mod secret_serde {
     use secrecy::{ExposeSecret, SecretString};
@@ -33,7 +28,7 @@ pub trait Credentials: Sized + Serialize + DeserializeOwned {
     fn prompt(source_name: &str) -> anyhow::Result<Self>;
 
     fn resolve(source_name: &str) -> anyhow::Result<Self> {
-        let account = source_account(source_name);
+        let account = keystore::source_account(source_name);
 
         if let Some(stored) = keystore::read_stored::<Self>(&account)? {
             return Ok(stored);
@@ -74,5 +69,16 @@ impl Credentials for UsernamePasswordCredentials {
 }
 
 pub fn delete_source_credentials(source_name: &str) -> anyhow::Result<bool> {
-    keystore::delete(&source_account(source_name))
+    keystore::delete(&keystore::source_account(source_name))
+}
+
+pub fn prompt_and_save_for_kind(kind: SourceKind, instance_name: &str) -> anyhow::Result<()> {
+    match kind {
+        SourceKind::Vodafone | SourceKind::O2 => {
+            let credentials = UsernamePasswordCredentials::prompt(instance_name)?;
+            keystore::write_stored(&keystore::source_account(instance_name), &credentials)?;
+        }
+    }
+
+    Ok(())
 }

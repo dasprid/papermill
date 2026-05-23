@@ -22,6 +22,7 @@ struct DocumentRef {
 }
 
 pub struct VodafoneSource {
+    instance_name: String,
     http: reqwest::Client,
     access_token: SecretString,
     customer_urns: Vec<String>,
@@ -31,8 +32,8 @@ pub struct VodafoneSource {
 impl VodafoneSource {
     pub const KIND: SourceKind = SourceKind::Vodafone;
 
-    pub async fn new() -> Result<Self, SourceError> {
-        let credentials = UsernamePasswordCredentials::resolve(Self::KIND.name())?;
+    pub async fn new(instance_name: &str) -> Result<Self, SourceError> {
+        let credentials = UsernamePasswordCredentials::resolve(instance_name)?;
 
         let http = crate::http::client_builder()
             .cookie_store(true)
@@ -44,6 +45,7 @@ impl VodafoneSource {
         let customer_urns = client::fetch_customer_urns(&http, &access_token).await?;
 
         Ok(Self {
+            instance_name: instance_name.to_string(),
             http,
             access_token,
             customer_urns,
@@ -56,6 +58,10 @@ impl VodafoneSource {
 impl Source for VodafoneSource {
     fn kind(&self) -> SourceKind {
         Self::KIND
+    }
+
+    fn instance_name(&self) -> &str {
+        &self.instance_name
     }
 
     async fn list_invoices(

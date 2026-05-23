@@ -4,6 +4,16 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Serialize, de::DeserializeOwned};
 
 const SERVICE: &str = "papermill";
+const SINK_PREFIX: &str = "sink:";
+const SOURCE_PREFIX: &str = "source:";
+
+pub fn sink_account(instance_name: &str) -> String {
+    format!("{SINK_PREFIX}{instance_name}")
+}
+
+pub fn source_account(instance_name: &str) -> String {
+    format!("{SOURCE_PREFIX}{instance_name}")
+}
 
 fn entry(account: &str) -> anyhow::Result<Entry> {
     Entry::new(SERVICE, account).context("Failed to construct keyring entry")
@@ -52,4 +62,17 @@ pub fn delete(account: &str) -> anyhow::Result<bool> {
         Err(KeyringError::NoEntry) => Ok(false),
         Err(error) => Err(anyhow!(error).context("Failed to delete keyring entry")),
     }
+}
+
+pub fn rename(old_account: &str, new_account: &str) -> anyhow::Result<bool> {
+    let Some(value) = read_string(old_account)? else {
+        return Ok(false);
+    };
+
+    entry(new_account)?
+        .set_password(&value)
+        .context("Failed to write keyring entry under new account")?;
+
+    delete(old_account)?;
+    Ok(true)
 }

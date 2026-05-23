@@ -2985,6 +2985,7 @@ dependencies = [
  "chromiumoxide",
  "chrono",
  "clap",
+ "crossterm",
  "directories",
  "futures",
  "hex",

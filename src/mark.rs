@@ -4,7 +4,7 @@ use crate::shutdown;
 use crate::sources::{Source, SourceError};
 use crate::state::{StateStore, UploadRecord};
 
-const MANUAL_TASK_ID: &str = "manually-uploaded";
+const MANUAL_TASK_REFERENCE: &str = "manually-uploaded";
 
 #[derive(Debug, Default)]
 pub struct MarkOutcome {
@@ -16,6 +16,7 @@ pub struct MarkOutcome {
 
 pub async fn run_mark(
     source: &mut dyn Source,
+    sink_ids: &[String],
     state: &StateStore,
     until: Option<NaiveDate>,
     dry_run: bool,
@@ -40,36 +41,40 @@ pub async fn run_mark(
             continue;
         }
 
-        if state
-            .is_uploaded(source.kind().name(), &invoice.external_id)
-            .await?
-        {
-            outcome.already_known += 1;
-            continue;
-        }
+        for sink_id in sink_ids {
+            if state
+                .is_uploaded(source.instance_name(), sink_id, &invoice.external_id)
+                .await?
+            {
+                outcome.already_known += 1;
+                continue;
+            }
 
-        if dry_run {
-            tracing::info!(
-                source = source.kind().name(),
-                "dry-run mark: {} {}",
-                invoice.invoice_number,
-                invoice.issued_on
-            );
+            if dry_run {
+                tracing::info!(
+                    source = source.instance_name(),
+                    sink = sink_id.as_str(),
+                    "dry-run mark: {} {}",
+                    invoice.invoice_number,
+                    invoice.issued_on
+                );
+                outcome.marked += 1;
+                continue;
+            }
+
+            state
+                .record_upload(&UploadRecord {
+                    source_id: source.instance_name().to_string(),
+                    sink_id: sink_id.clone(),
+                    external_id: invoice.external_id.clone(),
+                    sink_reference: Some(MANUAL_TASK_REFERENCE.to_string()),
+                    invoice_issued_at: invoice.issued_on,
+                    uploaded_at: now,
+                })
+                .await?;
+
             outcome.marked += 1;
-            continue;
         }
-
-        state
-            .record_upload(&UploadRecord {
-                source_id: source.kind().name().to_string(),
-                external_id: invoice.external_id.clone(),
-                paperless_task_id: MANUAL_TASK_ID.to_string(),
-                invoice_issued_at: invoice.issued_on,
-                uploaded_at: now,
-            })
-            .await?;
-
-        outcome.marked += 1;
     }
 
     Ok(outcome)

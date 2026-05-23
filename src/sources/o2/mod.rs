@@ -23,6 +23,7 @@ struct DocumentRef {
 }
 
 pub struct O2Source {
+    instance_name: String,
     http: reqwest::Client,
     subscription_ids: Vec<u64>,
     document_refs: HashMap<String, DocumentRef>,
@@ -31,8 +32,8 @@ pub struct O2Source {
 impl O2Source {
     pub const KIND: SourceKind = SourceKind::O2;
 
-    pub async fn new() -> Result<Self, SourceError> {
-        let credentials = UsernamePasswordCredentials::resolve(Self::KIND.name())?;
+    pub async fn new(instance_name: &str) -> Result<Self, SourceError> {
+        let credentials = UsernamePasswordCredentials::resolve(instance_name)?;
 
         let jar = Arc::new(Jar::default());
         let http = crate::http::client_builder()
@@ -44,6 +45,7 @@ impl O2Source {
         let subscription_ids = client::fetch_mobile_subscription_ids(&http).await?;
 
         Ok(Self {
+            instance_name: instance_name.to_string(),
             http,
             subscription_ids,
             document_refs: HashMap::new(),
@@ -68,6 +70,10 @@ fn sanitize_filename(value: &str) -> String {
 impl Source for O2Source {
     fn kind(&self) -> SourceKind {
         Self::KIND
+    }
+
+    fn instance_name(&self) -> &str {
+        &self.instance_name
     }
 
     async fn list_invoices(
